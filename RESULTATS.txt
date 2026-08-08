@@ -1,0 +1,49 @@
+==========================================================================
+EXPÉRIENCE 1 — Pouvoir discriminant (AUC, 8 graphes indépendants)
+==========================================================================
+
+modèle            AUC moy.  écart-type     min     max
+------------------------------------------------------
+static               0.606       0.025   0.547   0.633
+discounting          0.682       0.026   0.628   0.713
+eigentrust           1.000       0.000   1.000   1.000
+dtc                  0.999       0.001   0.998   1.000
+
+==========================================================================
+EXPÉRIENCE 2 — Résistance à l'injection
+==========================================================================
+
+Une donnée SANS aucune preuve propre, déclarée dérivée d'une source
+Co-Attestée. Uplift = confiance gagnée par la seule ascendance.
+
+modèle              source   fabriquée    témoin    uplift
+----------------------------------------------------------
+static               0.976       0.150     0.150     0.000
+discounting          0.976       0.150     0.150     0.000
+eigentrust           0.976       0.728     0.150     0.578
+dtc                  0.976       0.159     0.150     0.009
+
+==========================================================================
+SYNTHÈSE — front de Pareto
+==========================================================================
+
+modèle             détection (AUC)  injection (uplift)
+------------------------------------------------------
+static                       0.606               0.000
+discounting                  0.682               0.000
+eigentrust                   1.000               0.578
+dtc                          0.999               0.009
+
+Objectif : AUC élevée ET uplift faible.
+Aucune baseline n'atteint les deux simultanément.
+
+==========================================================================
+DÉTAIL — seuil de décision fixé à 0.45 (graphe seed=42)
+==========================================================================
+
+modèle          couverture   faux pos.  P̄ affectées   P̄ saines  séparation
+----------------------------------------------------------------------------
+static              15.0%        7.9%         0.580       0.615       0.035
+discounting         15.0%        7.9%         0.510       0.544       0.034
+eigentrust          37.5%        0.0%         0.453       0.687       0.234
+dtc                100.0%       11.2%         0.275       0.583       0.308
