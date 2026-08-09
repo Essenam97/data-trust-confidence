@@ -1,308 +1,198 @@
-# Propriétés formelles du DTC
-
-Démonstrations des propriétés annoncées au §5.3 de la formalisation.
-Vérifications empiriques correspondantes : `proofs_check.py`.
-
----
-
-## Notations
-
-| Symbole | Signification |
-|---|---|
-| `W` | poids d'ignorance a priori (`W = 2`) |
-| `a_x` | taux de base de la donnée `x`, fixé par politique |
-| `r_x, s_x` | masses de preuve positive / négative après décroissance |
-| `γ⁺_ρ, γ⁻_ρ` | facteurs d'atténuation positif / négatif du type de relation `ρ` |
-| `γ⁺_max` | `max_ρ γ⁺_ρ` |
-| `δ_max` | profondeur maximale de propagation |
-| `Δ` | degré sortant maximal du graphe |
-| `λ_u` | taux de décroissance des preuves `upstream_change` |
-
----
-
-## Proposition 1 — Non-suffisance de l'ascendance
-
-> **Énoncé.** Soit `x` une donnée ne possédant **aucune preuve locale**, dont
-> toutes les preuves sont de type `upstream_change` de polarité positive.
-> Alors sa confiance projetée est bornée par
->
-> ```
-> P_x  ≤  (r_x + a_x · W) / (r_x + W)
-> ```
->
-> et en particulier, pour tout seuil `τ > a_x`, on a `P_x < τ` dès que
->
-> ```
-> r_x  <  W · (τ − a_x) / (1 − τ)
-> ```
-
-### Démonstration
-
-Par hypothèse `s_x = 0`. Le mapping Beta donne
-
-```
-b_x = r_x / (r_x + W)      d_x = 0      u_x = W / (r_x + W)
-```
-
-La projection vaut
-
-```
-P_x = b_x + a_x · u_x
-    = r_x/(r_x + W) + a_x · W/(r_x + W)
-    = (r_x + a_x·W) / (r_x + W)                                    (1)
-```
-
-ce qui établit la borne. Résolvons `P_x < τ` :
-
-```
-(r_x + a_x·W) / (r_x + W) < τ
-⟺  r_x + a_x·W  <  τ·r_x + τ·W
-⟺  r_x(1 − τ)   <  W(τ − a_x)
-⟺  r_x          <  W(τ − a_x)/(1 − τ)          pour τ < 1          (2)
-```
-
-∎
-
-### Conséquence opérationnelle
-
-La quantité `r_x` est entièrement contrôlée par la politique. Chaque événement
-de propagation positive injecte une masse
-
-```
-w = γ⁺_ρ · |ΔP_y| · ρ^depth  ≤  γ⁺_max          car |ΔP_y| ≤ 1, ρ ≤ 1
-```
-
-**Cas d'un événement unique.** Avec les valeurs de référence
-`γ⁺_max = 0.30`, `W = 2`, `a_x = 0.15` :
-
-```
-r_x ≤ 0.30   ⟹   P_x ≤ (0.30 + 0.30)/2.30 = 0.261
-```
-
-La donnée fabriquée ne peut pas dépasser 0.261, très en deçà de la confiance
-de son parent (0.976). La mesure expérimentale donne 0.159, cohérente avec la
-borne (l'écart vient de `|ΔP_y| < 1`).
-
-**Cas de N événements — limite à assumer.** La proposition borne `r_x` à un
-instant donné, pas le nombre d'événements. Un attaquant capable de déclencher
-répétitivement des améliorations de confiance amont pourrait accumuler de la
-masse positive. Deux garde-fous existent :
-
-1. *Décroissance.* Les preuves `upstream_change` décroissent au taux `λ_u`.
-   Pour une fréquence d'événements `f`, la masse converge vers un régime
-   permanent
-   ```
-   r_x^∞  ≈  γ⁺_max · f / λ_u
-   ```
-   Avec `λ_u = 0.02` et `γ⁺_max = 0.30`, franchir `τ = 0.5` (soit
-   `r_x ≥ 1.4` d'après (2)) exigerait `f ≥ 0.093` événement par unité de
-   temps, **soutenu indéfiniment**, chaque événement devant en outre produire
-   `|ΔP_y| ≈ 1`.
-
-2. *Plafonnement explicite.* Imposer par politique
-   `Σ masses upstream_change positives ≤ r_cap` rend la borne inconditionnelle.
-
-**Le point 2 n'est pas implémenté dans le code de référence.** C'est une
-faiblesse à signaler telle quelle : la propriété P1 est établie *par
-événement* et en régime permanent, pas de façon inconditionnelle sur un
-historique adverse arbitraire.
-
-*Note.* Le plafonnement `cap_ratio` introduit au §« plafonnement de la masse
-propagée » borne chaque injection à `cap_ratio × (r + s + W)` de la cible.
-Il atténue le problème sans le résoudre : la borne reste relative à la masse
-déjà présente, donc croissante.
-
----
-
-## Proposition 2 — Terminaison
-
-> **Énoncé.** L'algorithme de propagation termine sur tout graphe orienté,
-> **y compris cyclique**, en un nombre d'appels borné par
->
-> ```
-> N  ≤  Σ_{k=1..δ_max} Δ^k  =  O(Δ^{δ_max})
-> ```
-
-### Démonstration
-
-Considérons la fonction de rang `φ(appel) = δ_max − depth`.
-
-À l'entrée de `_propagate`, la condition `depth ≥ δ_max` provoque un retour
-immédiat. Tout appel récursif est effectué avec `depth + 1`, donc `φ` décroît
-strictement à chaque niveau de récursion et reste entière positive. La
-récursion ne peut donc pas dépasser `δ_max` niveaux.
-
-Par ailleurs, chaque appel transmet `visited ∪ {dst}`, et tout successeur déjà
-présent dans `visited` est ignoré. Le long d'une branche donnée, aucun nœud
-n'est traité deux fois : les branches correspondent aux **chemins simples** du
-graphe, de longueur au plus `δ_max`.
-
-Le nombre de tels chemins issus d'un nœud est majoré par `Σ_{k=1..δ_max} Δ^k`,
-d'où la borne. La terminaison ne dépend d'aucune hypothèse d'acyclicité. ∎
-
-### Comparaison
-
-Les modèles à point fixe (EigenTrust, PageRank) requièrent une itération
-globale jusqu'à convergence — coûteuse, et dont le résultat en un nœud dépend
-de l'intégralité du graphe. Le DTC borne le calcul localement, ce qui rend
-chaque évaluation auditable indépendamment.
-
-### Vérification empirique
-
-Sur des graphes **entièrement cycliques** (cycle hamiltonien + arêtes
-aléatoires) :
-
-```
-n=   5 arêtes=   7 → 0.11 ms,   13 propagations, profondeur max 4
-n=  20 arêtes=  35 → 0.23 ms,   50 propagations, profondeur max 4
-n=  60 arêtes= 110 → 0.08 ms,  115 propagations, profondeur max 4
-n= 200 arêtes= 380 → 1.36 ms,  441 propagations, profondeur max 4
-```
-
-Aucune divergence. La profondeur plafonne à `δ_max = 4` comme prévu, et le
-nombre de propagations croît linéairement avec la taille du graphe sur ces
-instances (le majorant `O(Δ^{δ_max})` reste pessimiste).
-
----
-
-## Proposition 3 — Découplage détection / injection
-
-> **Énoncé.** La borne de la Proposition 1 ne dépend que de `γ⁺`. Le facteur
-> `γ⁻` peut être augmenté arbitrairement sans affecter `P_x` pour une donnée
-> dont les preuves de propagation sont positives.
-
-### Démonstration
-
-Immédiate : dans (1), `r_x` n'agrège que des preuves de polarité positive,
-dont les poids sont proportionnels à `γ⁺_ρ`. Le facteur `γ⁻_ρ` n'intervient
-que dans le calcul de `s_x`, absent de l'hypothèse. ∎
-
-### Portée
-
-C'est la justification formelle du résultat expérimental principal :
-amplifier `γ⁻` d'un facteur 16 fait passer l'AUC de 0.669 à 0.971 sans que
-l'uplift d'injection bouge (0.009 constant).
-
-L'asymétrie `γ⁻ ≫ γ⁺` n'est donc pas un réglage empirique heureux, mais la
-conséquence d'une propriété structurelle : **la vulnérabilité à l'injection et
-le pouvoir de détection sont gouvernés par des paramètres disjoints.** Les
-modèles transitifs ne peuvent pas exploiter ce découplage, leur opérateur de
-propagation étant symétrique en polarité.
-
-Vérification empirique : `γ⁻` multiplié par 256 laisse la confiance de la
-donnée fabriquée strictement inchangée (variation mesurée : 0.00e+00).
-
----
-
-## Plafonnement de la masse propagée
-
-Une seconde limite, découverte par les scénarios adverses.
-
-**Symptôme.** En compromission *partielle* — seule une fraction des données
-issues de la source est réellement touchée — le DTC s'effondrait à AUC 0.555,
-nettement en dessous de `static` (0.788) qui ne propage rien du tout. La
-propagation *nuisait*.
-
-**Diagnostic.** Masses de preuve mesurées sur les données enfants :
-
-```
-donnée    touchée   r local   s local   s propagé      P
-rec_0       False      0.61      0.00        3.07   0.266
-rec_1        True      0.61      0.25        3.07   0.255
-rec_2       False      0.61      0.00        4.61   0.211
-rec_4       False      0.61      0.00        5.38   0.191
-```
-
-La masse propagée (3.07 à 5.38) écrase le signal local réel (0.25). Pire, sa
-variation entre données ne reflète que le **type de relation** — c'est-à-dire
-du bruit — et devient la source dominante du classement.
-
-**Correction.** Plafonner la masse injectée relativement à la masse locale
-déjà présente sur la cible :
-
-```
-w  ←  min( γ_ρ · |ΔP| · ρ^depth ,  cap_ratio · (r_dst + s_dst + W) )
-```
-
-Calibration du plafond (jeu de calibration + scénario partiel seeds 0–7) :
-
-```
-   cap   AUC total   FP total   AUC partiel
- aucun       0.971      12.6%         0.555
-   2.0       0.970      12.6%         0.643
-   1.0       0.965      10.2%         0.791
-   0.4       0.919       9.1%         0.791
-  0.15       0.771       9.1%         0.791
-```
-
-`cap_ratio = 1.0` est retenu : il restaure la performance en compromission
-partielle (0.555 → 0.791) au prix de 0.006 d'AUC en compromission totale, et
-réduit au passage les faux positifs. Le plafond rendant l'amplification moins
-risquée, la calibration sélectionne ensuite `γ⁻ ×48` au lieu de `×16`.
-
-Vérification sur seeds disjoints (100–119) : DTC 0.771 contre `static` 0.779,
-soit une quasi-parité — l'effondrement est corrigé.
-
----
-
-## Résultat négatif — modulation par la distance au foyer
-
-Hypothèse testée : moduler le poids injecté par `ρ^depth` (`ρ < 1`) devait
-réduire les faux positifs, une donnée éloignée du foyer ne devant pas être
-dégradée autant qu'une copie directe.
-
-**Hypothèse réfutée.** Balayage conjoint sur le jeu de calibration :
-
-```
-γ⁻ ×16 :  ρ=1.0 → AUC 0.971, FP 12.6 %
-          ρ=0.6 → AUC 0.893, FP 11.5 %
-          ρ=0.3 → AUC 0.820, FP 11.4 %
-```
-
-(balayage antérieur au plafonnement)
-
-`ρ` dégrade la détection bien plus vite qu'il ne réduit les faux positifs.
-Le meilleur point admissible reste `ρ = 1.0`, c'est-à-dire sans modulation.
-
-**Diagnostic.** Les faux positifs ne proviennent pas de la propagation
-lointaine. Mesure des scores moyens des données saines :
-
-```
-modèle          P̄ saines   P̄ affectées   faux pos.
-static             0.611         0.581       9.4 %
-discounting        0.553         0.507       9.4 %
-eigentrust         0.696         0.452       0.0 %
-dtc                0.582         0.318      15.6 %
-```
-
-`static` ne propage rien et affiche déjà 9.4 % de faux positifs : c'est un
-**plancher intrinsèque** aux preuves locales (`transformation_opaque`,
-`base_rate` bas). La propagation du DTC n'ajoute qu'environ 6 points.
-
-Surtout, le 0 % d'EigenTrust n'est pas un mérite indépendant : il porte les
-données saines à 0.696 alors que leurs preuves propres n'en justifient que
-0.611. Il les **gonfle** par héritage. C'est exactement le mécanisme qui lui
-donne un uplift d'injection de 0.578.
-
-> **À retenir pour la rédaction.** L'avantage apparent d'EigenTrust sur les
-> faux positifs et sa vulnérabilité à l'injection sont le *même phénomène*
-> observé sous deux angles. On ne peut pas obtenir l'un sans l'autre. La
-> comparaison brute des taux de faux positifs est donc trompeuse et doit être
-> présentée avec cette mise en garde.
-
-Le paramètre `rho` est conservé dans le code (valeur par défaut `1.0`,
-neutre) afin que le résultat négatif reste reproductible.
-
----
-
-## Ce qui reste à démontrer
-
-- [ ] Borne inconditionnelle sur `r_x` en présence d'un adversaire contrôlant
-      la fréquence des événements amont (plafonnement `r_cap`)
-- [ ] Comportement en régime permanent : convergence ou oscillation de `P`
-      sous flux continu de preuves
-- [ ] Sensibilité de l'AUC aux paramètres `θ_ρ` et `λ_τ` (seuls `γ⁻`, `ρ` et
-      `cap_ratio` ont été balayés)
-- [ ] Réduire les faux positifs en compromission partielle (100 % : toutes les
-      données de la source passent sous le seuil, même si leur *classement*
-      reste correct)
+"""
+Vérification empirique des propositions démontrées dans PROPRIETES.md.
+
+  Prop. 1 — non-suffisance : la borne analytique est-elle respectée ?
+  Prop. 2 — terminaison sur graphe cyclique
+  Prop. 3 — découplage : γ⁻ n'affecte pas la confiance d'une donnée fabriquée
+
+Exécution : python3 proofs_check.py
+"""
+
+from __future__ import annotations
+
+import random
+import time
+
+from dtc.engine import DTCEngine
+from dtc.evidence import make_evidence, POSITIVE, NEGATIVE
+from dtc.graph import DRG, RELATION_POLICIES, RelationPolicy
+from dtc.opinion import W_PRIOR
+from dtc.scenarios import injection_resistance
+from dtc.experiment import run_injection
+
+OK, KO = "  OK", "  ÉCHEC"
+
+
+# ---------------------------------------------------------------------------
+# Proposition 1 — non-suffisance de l'ascendance
+# ---------------------------------------------------------------------------
+
+def check_p1() -> bool:
+    print("=" * 72)
+    print("PROPOSITION 1 — Non-suffisance de l'ascendance")
+    print("=" * 72)
+    print("\n  Une donnée sans preuve propre reste bornée par")
+    print("      P_x ≤ (r_x + a_x·W) / (r_x + W)\n")
+
+    scn = injection_resistance()
+    m = DTCEngine(graph=scn.graph)
+    for t, dio, ev in scn.timeline:
+        m.add_evidence(dio, ev)
+
+    a_x = scn.graph.nodes["fabricated"].base_rate
+    evs = m.evidence["fabricated"]
+    r_x = sum(e.mass_at(10.0) for e in evs if e.polarity == POSITIVE)
+    s_x = sum(e.mass_at(10.0) for e in evs if e.polarity == NEGATIVE)
+    p_measured = m.projected("fabricated", 10.0)
+    p_bound = (r_x + a_x * W_PRIOR) / (r_x + W_PRIOR)
+
+    gamma_max = max(p.gamma_p for p in RELATION_POLICIES.values())
+    p_worst = (gamma_max + a_x * W_PRIOR) / (gamma_max + W_PRIOR)
+
+    print(f"  confiance du parent          : {m.projected('trusted_source', 10.0):.3f}")
+    print(f"  preuves locales de la donnée : {len(m.local_evidence_only('fabricated'))}")
+    print(f"  masses (r, s)                : ({r_x:.4f}, {s_x:.4f})")
+    print(f"  taux de base a_x             : {a_x:.2f}")
+    print()
+    print(f"  P mesuré                     : {p_measured:.4f}")
+    print(f"  borne analytique             : {p_bound:.4f}")
+    print(f"  pire cas (|ΔP|=1, un saut)   : {p_worst:.4f}")
+
+    ok = p_measured <= p_bound + 1e-9 and p_measured <= p_worst + 1e-9
+    print(f"\n{OK if ok else KO} : la borne est respectée.")
+
+    tau = 0.5
+    r_limit = W_PRIOR * (tau - a_x) / (1 - tau)
+    print(f"\n  Seuil τ={tau} franchi seulement si r_x ≥ {r_limit:.2f}")
+    print(f"  (r_x observé = {r_x:.4f}, soit {r_limit / max(r_x, 1e-9):.0f}× moins)")
+    return ok
+
+
+# ---------------------------------------------------------------------------
+# Proposition 2 — terminaison sur graphe cyclique
+# ---------------------------------------------------------------------------
+
+def check_p2() -> bool:
+    print("\n" + "=" * 72)
+    print("PROPOSITION 2 — Terminaison sur graphe cyclique")
+    print("=" * 72)
+    print("\n  Graphes entièrement cycliques (cycle hamiltonien + arêtes aléatoires)\n")
+    print(f"  {'n':>5}{'arêtes':>9}{'durée':>11}{'propagations':>15}{'prof. max':>11}")
+    print("  " + "-" * 51)
+
+    ok = True
+    for n, extra in [(5, 3), (20, 15), (60, 50), (200, 180), (500, 400)]:
+        g = DRG()
+        for i in range(n):
+            g.add_node(f"n{i}", base_rate=0.5)
+        for i in range(n):
+            g.add_edge(f"n{i}", f"n{(i + 1) % n}", "copy")
+        rng = random.Random(0)
+        for _ in range(extra):
+            a, b = rng.randrange(n), rng.randrange(n)
+            if a != b:
+                g.add_edge(f"n{a}", f"n{b}", "derivation")
+
+        m = DTCEngine(graph=g)
+        for i in range(n):
+            m.add_evidence(f"n{i}", make_evidence("creation_attested", POSITIVE, 1.0))
+
+        t0 = time.time()
+        m.add_evidence("n0", make_evidence("origin_compromise", NEGATIVE, 50.0))
+        dt = (time.time() - t0) * 1000
+
+        depths = [r.depth for r in m.audit]
+        dmax = max(depths) if depths else 0
+        if dmax > m.max_depth:
+            ok = False
+        print(f"  {n:>5}{len(g.edges):>9}{dt:>9.2f} ms{len(m.audit):>15}{dmax:>11}")
+
+    print(f"\n{OK if ok else KO} : terminaison, profondeur ≤ δ_max = 4.")
+    return ok
+
+
+# ---------------------------------------------------------------------------
+# Proposition 3 — découplage détection / injection
+# ---------------------------------------------------------------------------
+
+def check_p3() -> bool:
+    print("\n" + "=" * 72)
+    print("PROPOSITION 3 — Découplage détection / injection")
+    print("=" * 72)
+    print("\n  γ⁻ ne doit avoir AUCUN effet sur la confiance d'une donnée fabriquée.\n")
+    print(f"  {'γ⁻ ×':>8}{'P fabriquée':>15}{'uplift':>10}")
+    print("  " + "-" * 33)
+
+    base = {k: (p.gamma_m, p.gamma_p) for k, p in RELATION_POLICIES.items()}
+    values = []
+    for scale in [1, 4, 16, 64, 256]:
+        for k, (gm, gp) in base.items():
+            old = RELATION_POLICIES[k]
+            RELATION_POLICIES[k] = RelationPolicy(k, old.theta, gm * scale, gp)
+        inj = run_injection(injection_resistance(), 10.0)["dtc"]
+        values.append(inj["fabricated"])
+        print(f"  {scale:>8}{inj['fabricated']:>15.4f}{inj['uplift']:>10.4f}")
+
+    for k, (gm, gp) in base.items():
+        RELATION_POLICIES[k] = RelationPolicy(k, RELATION_POLICIES[k].theta, gm, gp)
+
+    ok = max(values) - min(values) < 1e-9
+    print(f"\n{OK if ok else KO} : variation observée = {max(values) - min(values):.2e}")
+    print("  γ⁻ multiplié par 256 : aucun effet mesurable sur l'injection.")
+    return ok
+
+
+# ---------------------------------------------------------------------------
+
+def check_p4() -> bool:
+    """Proposition 4 — résistance à la diffamation."""
+    from dtc.scenarios import slander
+
+    print("\n" + "=" * 72)
+    print("PROPOSITION 4 — Résistance à la diffamation")
+    print("=" * 72)
+    print("\n  Un adversaire contrôle UNE source dont dérivent 30 données")
+    print("  légitimes qu'il ne contrôle pas. Combien passe-t-il sous 0.45 ?\n")
+    print(f"  {'impulsions':>11}{'accumulate':>13}{'standing':>11}{'masse prop.':>14}")
+    print("  " + "-" * 49)
+
+    ok = True
+    masses = []
+    for n in [1, 2, 4, 8, 16, 32]:
+        row = {}
+        for mode in ("accumulate", "standing"):
+            scn = slander(n_pulses=n)
+            m = DTCEngine(graph=scn.graph, propagation_mode=mode)
+            for t, dio, ev in scn.timeline:
+                m.add_evidence(dio, ev)
+            te = 10.0 + 5.0 * n + 2.0
+            vict = [m.projected(f"victim_{i}", te) for i in range(30)]
+            row[mode] = sum(1 for p in vict if p < 0.45) / len(vict)
+            if mode == "standing":
+                ev_prop = [e for e in m.evidence["victim_0"]
+                           if e.etype == "upstream_change"]
+                masses.append(sum(e.mass_at(te) for e in ev_prop))
+        if row["standing"] > 0.0:
+            ok = False
+        print(f"  {n:>11}{row['accumulate']:>12.0%}{row['standing']:>11.0%}"
+              f"{masses[-1]:>14.4f}")
+
+    # la masse ne doit pas croître avec le nombre d'événements
+    bounded = max(masses) - min(masses) < 0.5
+    print(f"\n  masse propagée : min {min(masses):.4f}, max {max(masses):.4f}")
+    print(f"  bornée indépendamment de N : {'oui' if bounded else 'NON'}")
+    print(f"\n{OK if ok and bounded else KO} : aucune victime bloquée, masse bornée.")
+    return ok and bounded
+
+
+def main() -> None:
+    results = [check_p1(), check_p2(), check_p3(), check_p4()]
+    print("\n" + "=" * 72)
+    print(f"BILAN — {sum(results)}/{len(results)} propositions vérifiées empiriquement")
+    print("=" * 72)
+    print("\nRappel : ces vérifications ne remplacent pas les démonstrations")
+    print("de PROPRIETES.md, elles les corroborent sur des instances concrètes.")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,8 +1,81 @@
-  γ⁻ ×   γ⁺ ×  couverture  faux pos.  uplift inj.
--------------------------------------------------
-     1    1.0      17.5%       7.9%        0.009
-     2    1.0      17.5%       7.9%        0.009
-     4    1.0      22.5%       7.9%        0.009
-     8    1.0      37.5%       7.9%        0.009
-    16    1.0      80.0%       9.6%        0.009
-    32    1.0     100.0%      10.8%        0.009
+========================================================================
+PROPOSITION 1 — Non-suffisance de l'ascendance
+========================================================================
+
+  Une donnée sans preuve propre reste bornée par
+      P_x ≤ (r_x + a_x·W) / (r_x + W)
+
+  confiance du parent          : 0.976
+  preuves locales de la donnée : 0
+  masses (r, s)                : (0.0223, 0.0000)
+  taux de base a_x             : 0.15
+
+  P mesuré                     : 0.1594
+  borne analytique             : 0.1594
+  pire cas (|ΔP|=1, un saut)   : 0.2609
+
+  OK : la borne est respectée.
+
+  Seuil τ=0.5 franchi seulement si r_x ≥ 1.40
+  (r_x observé = 0.0223, soit 63× moins)
+
+========================================================================
+PROPOSITION 2 — Terminaison sur graphe cyclique
+========================================================================
+
+  Graphes entièrement cycliques (cycle hamiltonien + arêtes aléatoires)
+
+      n   arêtes      durée   propagations  prof. max
+  ---------------------------------------------------
+      5        7     0.13 ms             14          4
+     20       35     0.26 ms             50          4
+     60      110     0.09 ms            115          4
+    200      380     1.15 ms            443          4
+    500      899     0.83 ms            946          4
+
+  OK : terminaison, profondeur ≤ δ_max = 4.
+
+========================================================================
+PROPOSITION 3 — Découplage détection / injection
+========================================================================
+
+  γ⁻ ne doit avoir AUCUN effet sur la confiance d'une donnée fabriquée.
+
+      γ⁻ ×    P fabriquée    uplift
+  ---------------------------------
+         1         0.1594    0.0094
+         4         0.1594    0.0094
+        16         0.1594    0.0094
+        64         0.1594    0.0094
+       256         0.1594    0.0094
+
+  OK : variation observée = 0.00e+00
+  γ⁻ multiplié par 256 : aucun effet mesurable sur l'injection.
+
+========================================================================
+PROPOSITION 4 — Résistance à la diffamation
+========================================================================
+
+  Un adversaire contrôle UNE source dont dérivent 30 données
+  légitimes qu'il ne contrôle pas. Combien passe-t-il sous 0.45 ?
+
+   impulsions   accumulate   standing   masse prop.
+  -------------------------------------------------
+            1          0%         0%        0.0305
+            2        100%         0%        0.0198
+            4        100%         0%        0.0133
+            8        100%         0%        0.0101
+           16        100%         0%        0.0091
+           32        100%         0%        0.0090
+
+  masse propagée : min 0.0090, max 0.0305
+  bornée indépendamment de N : oui
+
+  OK : aucune victime bloquée, masse bornée.
+
+========================================================================
+BILAN — 4/4 propositions vérifiées empiriquement
+========================================================================
+
+Rappel : ces vérifications ne remplacent pas les démonstrations
+de PROPRIETES.md, elles les corroborent sur des instances concrètes.

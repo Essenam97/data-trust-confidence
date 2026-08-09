@@ -1,82 +1,66 @@
-"""
-Expériences de référence du Data Trust Confidence.
+============================================================================
+PROTOCOLE — séparation calibration / évaluation
+============================================================================
 
-Reproductibilité : python3 run_experiment.py
-Aucune dépendance externe (bibliothèque standard uniquement).
-"""
-import statistics as st
+graphes de calibration : 10  seeds=[310, 655, 1133, 2471, 2474, 3492, 3674, 4838, 5058, 6201]
+graphes d'évaluation   : 20  seeds=[153, 448, 2413, 2857, 2982, 5092, 5302, 5416, 5910, 6152, 6448, 7264, 7642, 7885, 9391, 9392, 9673, 9741, 9844, 9851]
+partition disjointe, figée avant tout calcul.
 
-from dtc.scenarios import lineage_compromise, injection_resistance
-from dtc.experiment import build_models, run, run_injection, format_table
+============================================================================
+PHASE 1 — calibration de γ⁻ (jeu de calibration UNIQUEMENT)
+============================================================================
 
-SEEDS = [1, 7, 13, 42, 99, 123, 777, 2024]
-T_EVAL = 55.0
+Critère retenu : maximiser l'AUC sous contrainte de faux positifs
+≤ 15 % au seuil 0.45. Le critère est fixé avant le balayage.
 
+   γ⁻ ×   AUC calib.   faux pos.   admissible
+---------------------------------------------
+      1        0.669        9.1%          oui
+      2        0.698        9.1%          oui
+      4        0.762        9.1%          oui
+      8        0.882        9.3%          oui
+     12        0.940        9.7%          oui
+     16        0.963       10.1%          oui
+     24        0.983       10.3%          oui
+     32        0.988       10.4%          oui
+     48        0.989       10.5%          oui
 
-def auc(pairs):
-    """P(score d'une donnée affectée < score d'une donnée saine).
-    0.5 = aucun pouvoir discriminant ; 1.0 = séparation parfaite."""
-    aff = [p for p, a in pairs if a]
-    cln = [p for p, a in pairs if not a]
-    if not aff or not cln:
-        return float("nan")
-    wins = sum(1 for x in aff for y in cln if x < y)
-    ties = sum(1 for x in aff for y in cln if x == y)
-    return (wins + 0.5 * ties) / (len(aff) * len(cln))
+→ γ⁻ retenu : ×48  (AUC calib. 0.989, FP 10.5%)
+→ valeur GELÉE. Le jeu d'évaluation n'a influencé aucun choix.
 
+============================================================================
+PHASE 2 — évaluation sur 20 graphes jamais vus
+============================================================================
 
-def scores_for(seed):
-    scn = lineage_compromise(seed=seed)
-    out = {}
-    for name, m in build_models(scn).items():
-        for t, dio, ev in scn.timeline:
-            m.add_evidence(dio, ev)
-        out[name] = [(m.projected(d, T_EVAL), n.truly_affected)
-                     for d, n in scn.graph.nodes.items()]
-    return out
+modèle            AUC moy.        σ     min     max   FP moy.
+-------------------------------------------------------------
+static               0.610    0.070   0.518   0.772      9.8%
+discounting          0.702    0.111   0.548   0.884      9.8%
+eigentrust           1.000    0.001   0.997   1.000      0.0%
+dtc                  0.957    0.082   0.663   1.000     13.1%
 
+AUC calibration : 0.989
+AUC évaluation  : 0.957
+écart           : +0.032  → écart faible, acceptable
 
-def main():
-    print("=" * 74)
-    print("EXPÉRIENCE 1 — Pouvoir discriminant (AUC, 8 graphes indépendants)")
-    print("=" * 74)
-    agg = {}
-    for s in SEEDS:
-        for name, pairs in scores_for(s).items():
-            agg.setdefault(name, []).append(auc(pairs))
-    print(f"\n{'modèle':<16}{'AUC moy.':>10}{'écart-type':>12}{'min':>8}{'max':>8}")
-    print("-" * 54)
-    for k, v in agg.items():
-        print(f"{k:<16}{st.mean(v):>10.3f}{st.pstdev(v):>12.3f}"
-              f"{min(v):>8.3f}{max(v):>8.3f}")
+============================================================================
+Résistance à l'injection (indépendante du jeu de graphes)
+============================================================================
 
-    print("\n" + "=" * 74)
-    print("EXPÉRIENCE 2 — Résistance à l'injection")
-    print("=" * 74)
-    print("\nUne donnée SANS aucune preuve propre, déclarée dérivée d'une source")
-    print("Co-Attestée. Uplift = confiance gagnée par la seule ascendance.\n")
-    inj = run_injection(injection_resistance(), t_eval=10.0)
-    print(f"{'modèle':<16}{'source':>10}{'fabriquée':>12}{'témoin':>10}{'uplift':>10}")
-    print("-" * 58)
-    for m, v in inj.items():
-        print(f"{m:<16}{v['trusted_source']:>10.3f}{v['fabricated']:>12.3f}"
-              f"{v['orphan']:>10.3f}{v['uplift']:>10.3f}")
+modèle             fabriquée    témoin    uplift
+------------------------------------------------
+static                 0.150     0.150     0.000
+discounting            0.150     0.150     0.000
+eigentrust             0.728     0.150     0.578
+dtc                    0.159     0.150     0.009
 
-    print("\n" + "=" * 74)
-    print("SYNTHÈSE — front de Pareto")
-    print("=" * 74)
-    print(f"\n{'modèle':<16}{'détection (AUC)':>18}{'injection (uplift)':>20}")
-    print("-" * 54)
-    for k in agg:
-        print(f"{k:<16}{st.mean(agg[k]):>18.3f}{inj[k]['uplift']:>20.3f}")
-    print("\nObjectif : AUC élevée ET uplift faible.")
-    print("Aucune baseline n'atteint les deux simultanément.")
+============================================================================
+SYNTHÈSE — résultats sur jeu d'évaluation tenu à l'écart
+============================================================================
 
-    print("\n" + "=" * 74)
-    print("DÉTAIL — seuil de décision fixé à 0.45 (graphe seed=42)")
-    print("=" * 74 + "\n")
-    print(format_table(run(lineage_compromise(seed=42), T_EVAL, 0.45)))
-
-
-if __name__ == "__main__":
-    main()
+modèle             détection (AUC ↑)  injection (uplift ↓)
+----------------------------------------------------------
+static                         0.610                 0.000
+discounting                    0.702                 0.000
+eigentrust                     1.000                 0.578
+dtc                            0.957                 0.009

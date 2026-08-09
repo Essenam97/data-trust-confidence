@@ -1,157 +1,330 @@
-"""
-Vérification empirique des propositions démontrées dans PROPRIETES.md.
+# Data Trust Confidence (DTC) — Formalisation
 
-  Prop. 1 — non-suffisance : la borne analytique est-elle respectée ?
-  Prop. 2 — terminaison sur graphe cyclique
-  Prop. 3 — découplage : γ⁻ n'affecte pas la confiance d'une donnée fabriquée
+**Version :** v1.0 — base pour rédaction d'un article scientifique
+**Objet :** modèle formel d'évaluation dynamique de la confiance d'une donnée
+dans une architecture de gouvernance centrée sur la donnée
 
-Exécution : python3 proofs_check.py
-"""
+Documents associés :
+- `dtc-reference/PROPRIETES.md` — démonstrations formelles
+- `dtc-reference/README.md` — résultats expérimentaux et limites
+- `dtc-reference/` — implémentation exécutable
 
-from __future__ import annotations
+---
 
-import random
-import time
+## 0. Avertissement méthodologique
 
-from dtc.engine import DTCEngine
-from dtc.evidence import make_evidence, POSITIVE, NEGATIVE
-from dtc.graph import DRG, RELATION_POLICIES, RelationPolicy
-from dtc.opinion import W_PRIOR
-from dtc.scenarios import injection_resistance
-from dtc.experiment import run_injection
+Ce document distingue explicitement :
 
-OK, KO = "  OK", "  ÉCHEC"
+| Marqueur | Signification |
+|---|---|
+| **[EXISTANT]** | Repris de la littérature — doit être cité, ne constitue pas une contribution |
+| **[ADAPTÉ]** | Formalisme existant appliqué à un contexte nouveau — contribution faible mais légitime |
+| **[CONTRIBUTION]** | Mécanisme original — c'est ce qui doit porter le papier |
 
+La crédibilité d'un article tient autant à ce qu'il revendique qu'à ce qu'il
+reconnaît devoir aux autres.
 
-# ---------------------------------------------------------------------------
-# Proposition 1 — non-suffisance de l'ascendance
-# ---------------------------------------------------------------------------
+---
 
-def check_p1() -> bool:
-    print("=" * 72)
-    print("PROPOSITION 1 — Non-suffisance de l'ascendance")
-    print("=" * 72)
-    print("\n  Une donnée sans preuve propre reste bornée par")
-    print("      P_x ≤ (r_x + a_x·W) / (r_x + W)\n")
+## 1. Notations et objets de base
 
-    scn = injection_resistance()
-    m = DTCEngine(graph=scn.graph)
-    for t, dio, ev in scn.timeline:
-        m.add_evidence(dio, ev)
+Soit `D` l'ensemble des données gouvernées, chacune identifiée par un
+identifiant persistant, et `G = (D, R)` le graphe de lignage, orienté et
+possiblement cyclique, dont les arêtes portent un type de relation
+`ρ ∈ {copie, dérivation, transformation, agrégation, référence}`.
 
-    a_x = scn.graph.nodes["fabricated"].base_rate
-    evs = m.evidence["fabricated"]
-    r_x = sum(e.mass_at(10.0) for e in evs if e.polarity == POSITIVE)
-    s_x = sum(e.mass_at(10.0) for e in evs if e.polarity == NEGATIVE)
-    p_measured = m.projected("fabricated", 10.0)
-    p_bound = (r_x + a_x * W_PRIOR) / (r_x + W_PRIOR)
+### 1.1 État de confiance — l'opinion **[EXISTANT — Jøsang, Subjective Logic]**
 
-    gamma_max = max(p.gamma_p for p in RELATION_POLICIES.values())
-    p_worst = (gamma_max + a_x * W_PRIOR) / (gamma_max + W_PRIOR)
+```
+ω_x(t) = ( b_x(t), d_x(t), u_x(t), a_x )        avec  b + d + u = 1
+```
 
-    print(f"  confiance du parent          : {m.projected('trusted_source', 10.0):.3f}")
-    print(f"  preuves locales de la donnée : {len(m.local_evidence_only('fabricated'))}")
-    print(f"  masses (r, s)                : ({r_x:.4f}, {s_x:.4f})")
-    print(f"  taux de base a_x             : {a_x:.2f}")
-    print()
-    print(f"  P mesuré                     : {p_measured:.4f}")
-    print(f"  borne analytique             : {p_bound:.4f}")
-    print(f"  pire cas (|ΔP|=1, un saut)   : {p_worst:.4f}")
+- `b` — croyance : masse de preuve soutenant la fiabilité
+- `d` — méfiance : masse de preuve soutenant la non-fiabilité
+- `u` — incertitude : masse de preuve manquante
+- `a` — taux de base, fixé par politique de gouvernance
 
-    ok = p_measured <= p_bound + 1e-9 and p_measured <= p_worst + 1e-9
-    print(f"\n{OK if ok else KO} : la borne est respectée.")
+**Justification.** Un score scalaire confond deux situations opérationnellement
+opposées : une donnée jamais observée (incertitude maximale) et une donnée
+abondamment observée au bilan mitigé. Toutes deux produiraient ≈ 0.5. La
+séparation `u` vs `(b,d)` permet de distinguer *« refuser car douteux »* de
+*« refuser car inconnu »* — deux décisions appelant des remédiations
+différentes.
 
-    tau = 0.5
-    r_limit = W_PRIOR * (tau - a_x) / (1 - tau)
-    print(f"\n  Seuil τ={tau} franchi seulement si r_x ≥ {r_limit:.2f}")
-    print(f"  (r_x observé = {r_x:.4f}, soit {r_limit / max(r_x, 1e-9):.0f}× moins)")
-    return ok
+---
 
+## 2. Modèle de preuve
 
-# ---------------------------------------------------------------------------
-# Proposition 2 — terminaison sur graphe cyclique
-# ---------------------------------------------------------------------------
+### 2.1 Élément de preuve **[ADAPTÉ]**
 
-def check_p2() -> bool:
-    print("\n" + "=" * 72)
-    print("PROPOSITION 2 — Terminaison sur graphe cyclique")
-    print("=" * 72)
-    print("\n  Graphes entièrement cycliques (cycle hamiltonien + arêtes aléatoires)\n")
-    print(f"  {'n':>5}{'arêtes':>9}{'durée':>11}{'propagations':>15}{'prof. max':>11}")
-    print("  " + "-" * 51)
+```
+e = ( τ , σ , w , t_e , κ )
+```
 
-    ok = True
-    for n, extra in [(5, 3), (20, 15), (60, 50), (200, 180), (500, 400)]:
-        g = DRG()
-        for i in range(n):
-            g.add_node(f"n{i}", base_rate=0.5)
-        for i in range(n):
-            g.add_edge(f"n{i}", f"n{(i + 1) % n}", "copy")
-        rng = random.Random(0)
-        for _ in range(extra):
-            a, b = rng.randrange(n), rng.randrange(n)
-            if a != b:
-                g.add_edge(f"n{a}", f"n{b}", "derivation")
+| Champ | Description |
+|---|---|
+| `τ` | type d'événement |
+| `σ ∈ {+1,−1}` | polarité |
+| `w` | poids brut |
+| `t_e` | horodatage |
+| `κ ∈ [0,1]` | crédibilité de la **source de la preuve** |
 
-        m = DTCEngine(graph=g)
-        for i in range(n):
-            m.add_evidence(f"n{i}", make_evidence("creation_attested", POSITIVE, 1.0))
+Le facteur `κ` applique le principe *Zero Trust* au flux de preuves lui-même :
+une preuve issue d'un système faiblement attesté ne pèse pas autant qu'une
+preuve issue d'une autorité co-attestée.
 
-        t0 = time.time()
-        m.add_evidence("n0", make_evidence("origin_compromise", NEGATIVE, 50.0))
-        dt = (time.time() - t0) * 1000
+### 2.2 Décroissance temporelle typée **[ADAPTÉ]**
 
-        depths = [r.depth for r in m.audit]
-        dmax = max(depths) if depths else 0
-        if dmax > m.max_depth:
-            ok = False
-        print(f"  {n:>5}{len(g.edges):>9}{dt:>9.2f} ms{len(m.audit):>15}{dmax:>11}")
+```
+r_x(t) = Σ_{σ=+1}  w·κ·exp( −λ_τ · (t − t_e) )
+s_x(t) = Σ_{σ=−1}  w·κ·exp( −λ_τ · (t − t_e) )
+```
 
-    print(f"\n{OK if ok else KO} : terminaison, profondeur ≤ δ_max = 4.")
-    return ok
+`λ` est **typé par preuve**, pas global :
 
+- `λ` faible pour l'attestation d'origine — elle ne se périme pas vite
+- `λ` élevé pour un contrôle d'intégrité — celui d'il y a deux ans ne dit rien
+  de l'état actuel
+- **`λ = 0` pour une compromission avérée** — décision de sécurité forte : elle
+  ferme l'attaque consistant à attendre l'expiration de la mauvaise
+  réputation. Seule une remédiation attestée peut la contrebalancer.
 
-# ---------------------------------------------------------------------------
-# Proposition 3 — découplage détection / injection
-# ---------------------------------------------------------------------------
+*Validation :* scénario de révélation tardive, la défiance ne s'érode pas
+jusqu'à t = 50 000.
 
-def check_p3() -> bool:
-    print("\n" + "=" * 72)
-    print("PROPOSITION 3 — Découplage détection / injection")
-    print("=" * 72)
-    print("\n  γ⁻ ne doit avoir AUCUN effet sur la confiance d'une donnée fabriquée.\n")
-    print(f"  {'γ⁻ ×':>8}{'P fabriquée':>15}{'uplift':>10}")
-    print("  " + "-" * 33)
+### 2.3 Passage aux opinions **[EXISTANT — Beta reputation]**
 
-    base = {k: (p.gamma_m, p.gamma_p) for k, p in RELATION_POLICIES.items()}
-    values = []
-    for scale in [1, 4, 16, 64, 256]:
-        for k, (gm, gp) in base.items():
-            old = RELATION_POLICIES[k]
-            RELATION_POLICIES[k] = RelationPolicy(k, old.theta, gm * scale, gp)
-        inj = run_injection(injection_resistance(), 10.0)["dtc"]
-        values.append(inj["fabricated"])
-        print(f"  {scale:>8}{inj['fabricated']:>15.4f}{inj['uplift']:>10.4f}")
+```
+b = r/(r+s+W)      d = s/(r+s+W)      u = W/(r+s+W)        (W = 2)
+```
 
-    for k, (gm, gp) in base.items():
-        RELATION_POLICIES[k] = RelationPolicy(k, RELATION_POLICIES[k].theta, gm, gp)
+### 2.4 Taux de base gouverné **[ADAPTÉ]**
 
-    ok = max(values) - min(values) < 1e-9
-    print(f"\n{OK if ok else KO} : variation observée = {max(values) - min(values):.2e}")
-    print("  γ⁻ multiplié par 256 : aucun effet mesurable sur l'injection.")
-    return ok
+`a_x = a_base( classification, niveau d'attestation, juridiction )`. Ce
+paramètre porte toute la sémantique du *« que croire en l'absence de preuve »*.
+Le rendre explicite, versionné et gouverné — plutôt que caché dans une
+heuristique — est une exigence d'auditabilité.
 
+---
 
-# ---------------------------------------------------------------------------
+## 3. Projection décisionnelle
 
-def main() -> None:
-    results = [check_p1(), check_p2(), check_p3()]
-    print("\n" + "=" * 72)
-    print(f"BILAN — {sum(results)}/{len(results)} propositions vérifiées empiriquement")
-    print("=" * 72)
-    print("\nRappel : ces vérifications ne remplacent pas les démonstrations")
-    print("de PROPRIETES.md, elles les corroborent sur des instances concrètes.")
+```
+P_x(t) = b_x(t) + a_x · u_x(t)                              [EXISTANT]
+```
 
+**Règle architecturale.** `P_x` est toujours fournie *accompagnée* de l'opinion
+complète et des preuves déterminantes, ce qui autorise des politiques
+inexprimables avec un scalaire seul :
 
-if __name__ == "__main__":
-    main()
+```
+SI  P ≥ 0.7  ET  u ≤ 0.3   → autoriser
+SI  P ≥ 0.7  ET  u >  0.3   → autoriser avec validation supplémentaire
+SI  d ≥ 0.4                 → refuser et déclencher investigation
+```
+
+---
+
+## 4. Fusion et dépendance des sources **[EXISTANT]**
+
+L'accumulation au niveau de `r` et `s` équivaut à la fusion cumulative de la
+logique subjective. Elle suppose l'indépendance des observations.
+
+*Traitement retenu :* déduplication par identifiant d'observation primaire,
+les preuves partageant la même référence étant fusionnées par `max` plutôt que
+`somme`.
+
+> **Limite assumée.** Correct pour la duplication exacte, insuffisant pour la
+> corrélation partielle entre sources partageant une infrastructure commune.
+
+---
+
+## 5. Propagation non transitive **[CONTRIBUTION — cœur du papier]**
+
+### 5.1 Le problème
+
+L'architecture exige que la confiance ne se propage jamais automatiquement,
+tout en admettant qu'une modification d'une donnée source doive entraîner une
+réévaluation des données dépendantes. Ces exigences paraissent contradictoires.
+
+Les modèles existants tranchent dans l'autre sens :
+
+- **Logique subjective avec discounting** : `ω_x^{A:B} = ω_A^B ⊗ ω_B^x` —
+  héritage direct.
+- **EigenTrust, PageRank** : la propagation transitive est le mécanisme
+  *constitutif*.
+
+Adopter l'un d'eux rouvre la faille visée : une donnée fabriquée à partir d'une
+source réputée fiable hérite de cette réputation.
+
+### 5.2 Le mécanisme
+
+Un changement amont **n'altère jamais l'opinion aval**. Il **injecte une
+preuve** dans le flux d'évidence aval, ensuite fusionnée avec les preuves
+locales par le processus normal.
+
+```
+ALGORITHME PropagationNonTransitive
+
+  1.  Δ ← P_y(t) − P_y(t⁻)
+  2.  SI |Δ| < θ_ρ ALORS ARRÊT
+  3.  σ ← −signe(Δ)
+  4.  w ← γ_ρ · |Δ| · ρ^depth
+  5.  w ← min( w , cap · (r_dst + s_dst + W) )      ← plafonnement
+  6.  SI depth > δ_max OU dst ∈ visited ALORS ARRÊT
+  7.  E_dst ← E_dst ∪ { (upstream_change, σ, w, t) }
+  8.  recalculer ω_dst  puis  propager récursivement
+```
+
+### 5.3 Propriétés démontrées
+
+Démonstrations complètes dans `PROPRIETES.md`.
+
+**Proposition 1 — Non-suffisance.** Une donnée sans preuve locale vérifie
+
+```
+P_x ≤ (r_x + a_x·W)/(r_x + W)     et    P_x < τ   dès que   r_x < W(τ−a_x)/(1−τ)
+```
+
+Avec `γ⁺_max = 0.30`, `W = 2`, `a_x = 0.15` : `P_x ≤ 0.261` au pire cas.
+*Mesure : 0.159.* Une donnée ne devient pas fiable parce que son parent l'est.
+
+**Proposition 2 — Terminaison.** L'algorithme termine sur tout graphe, **y
+compris cyclique**, en `O(Δ^δmax)` appels. Vérifié jusqu'à n = 500 nœuds
+entièrement cycliques. Les modèles à point fixe requièrent au contraire une
+convergence itérative globale, difficile à auditer localement.
+
+**Proposition 3 — Découplage.** La borne de P1 ne dépend que de `γ⁺` ; `γ⁻`
+n'intervient que dans `s_x`. *Vérification : `γ⁻ ×256` laisse la confiance de
+la donnée fabriquée strictement inchangée (variation `0.00e+00`).*
+
+### 5.4 Ce que P3 change
+
+C'est le résultat central, et il n'était pas anticipé.
+
+`γ⁺` gouverne la résistance à l'injection et **doit** rester petit. `γ⁻`
+gouverne le pouvoir de détection et **peut** être grand sans aucun effet sur
+l'injection — amplifier la propagation des mauvaises nouvelles n'ouvre aucun
+vecteur d'attaque, puisque personne ne cherche à faire hériter de la défiance.
+
+> L'asymétrie `γ⁻ ≫ γ⁺` n'est pas une heuristique de précaution : c'est le
+> mécanisme structurel qui rend les deux objectifs simultanément atteignables.
+> Les modèles transitifs ne peuvent pas l'exploiter, leur opérateur étant
+> symétrique en polarité.
+
+### 5.5 Plafonnement de la masse propagée
+
+Découvert par les scénarios adverses. En compromission *partielle*, la masse
+propagée (3–5.4) écrasait le signal local réel (0.25), et sa variation selon le
+type de relation devenait la source dominante du classement — du bruit. L'AUC
+tombait à 0.555, *sous* un modèle sans aucune propagation (0.788).
+
+Correction : borner la masse injectée relativement à la masse locale déjà
+présente sur la cible. Avec `cap = 1.0`, l'AUC en compromission partielle
+remonte à 0.771 (parité avec 0.779) au prix de 0.006 d'AUC en compromission
+totale.
+
+---
+
+## 6. Positionnement par rapport à l'existant
+
+| Critère | Beta Reputation | Subjective Logic | EigenTrust | Scores industriels | **DTC** |
+|---|---|---|---|---|---|
+| Représentation | scalaire + variance | opinion (b,d,u,a) | scalaire | scalaire | opinion (b,d,u,a) |
+| Distingue ignorance / défiance | partiellement | **oui** | non | non | **oui** |
+| Décroissance temporelle | oui | possible | non | variable | **oui, typée** |
+| Propagation transitive | non traitée | **constitutive** | **constitutive** | rare | **non — par conception** |
+| Réaction aux changements amont | non | recalcul transitif | recalcul global | rare | **injection de preuve** |
+| Terminaison sur graphe cyclique | n/a | dépend de l'opérateur | itérative | n/a | **bornée, démontrée** |
+| Explicabilité | moyenne | bonne | **faible** | faible | **traçable aux preuves** |
+| Résistance à l'héritage de réputation | n/a | **faible** | **faible** | faible | **objectif démontré** |
+
+**Formulation honnête de la contribution :**
+
+> Le DTC ne propose pas un nouveau calcul de confiance. Il propose une
+> *discipline de propagation* : un mécanisme par lequel l'information de
+> confiance amont influence l'aval sans être héritée, en étant convertie en
+> preuve locale bornée plutôt qu'en opinion transmise. La contribution porte
+> sur la propagation, pas sur la mesure.
+
+Revendication étroite — c'est ce qui la rend défendable.
+
+---
+
+## 7. Résultats expérimentaux
+
+Protocole : 30 graphes à topologies variées, partition stricte figée avant tout
+calcul (10 calibration / 20 évaluation), paramètres gelés après calibration.
+
+```
+modèle             détection (AUC ↑)   injection (uplift ↓)   faux positifs
+static                       0.610                  0.000           9.8 %
+discounting                  0.702                  0.000           9.8 %
+eigentrust                   1.000                  0.578           0.0 %
+dtc                          0.970                  0.009          14.7 %
+```
+
+Contrôle de surajustement : écart calibration/évaluation de +0.017.
+
+Le DTC atteint 97 % du pouvoir de détection du modèle transitif tout en
+conservant une résistance à l'injection comparable aux modèles non
+propagatifs. Aucune baseline n'occupe ce point du front de Pareto.
+
+**Mise en garde essentielle.** Le 0 % de faux positifs d'EigenTrust n'est pas
+un mérite indépendant : il porte les données saines à 0.696 alors que leurs
+preuves propres n'en justifient que 0.611 — il les *gonfle* par héritage,
+exactement le mécanisme qui lui donne 0.578 d'uplift d'injection. Son avantage
+apparent sur les faux positifs et sa vulnérabilité à l'injection sont le même
+phénomène vu sous deux angles.
+
+---
+
+## 8. Limites à reconnaître explicitement
+
+1. **L'AUC de 1.000 d'EigenTrust est un artefact du scénario principal** — une
+   racine compromise dont toute la descendance est affectée est exactement ce
+   que la propagation transitive est conçue pour trouver.
+2. **Données entièrement synthétiques.** Aucune validation sur lignage réel.
+3. **P1 n'est pas inconditionnelle** — établie par événement et en régime
+   permanent, pas face à un adversaire contrôlant la fréquence des événements
+   amont.
+4. **Corrélation partielle entre sources non traitée.**
+5. **Faux positifs à 100 %** en compromission partielle : toutes les données de
+   la source passent sous le seuil, même si leur *classement* reste correct.
+6. **Nombreux paramètres**, dont seuls `γ⁻`, `ρ` et `cap` ont été balayés.
+7. **Le modèle ne détecte rien** — il agrège des preuves produites par
+   d'autres mécanismes. Sa qualité est bornée par celle de ses capteurs.
+
+---
+
+## 9. Structure d'article proposée
+
+Cadrage recommandé : **ne pas** présenter le papier comme « voici une nouvelle
+architecture ». Le présenter comme « voici un mécanisme de propagation de
+confiance qui résout un problème précis ». L'architecture devient le contexte,
+pas la revendication. Un papier à contribution étroite et démontrée passe ; un
+papier annonçant une architecture entière se fait rejeter pour manque de focus.
+
+1. Introduction — l'héritage de réputation dans le lignage de données
+2. Related Work — Jøsang ; Ismail & Jøsang ; Kamvar et al. ; W3C PROV ;
+   XACML / OPA
+3. Modèle formel
+4. Propagation non transitive
+5. Propriétés démontrées (P1, P2, P3)
+6. Évaluation — protocole, front de Pareto, scénarios adverses
+7. Résultats négatifs et limites
+8. Conclusion
+
+Cible réaliste : workshop ou conférence de niveau intermédiaire en sécurité /
+gouvernance des données, doublé d'un preprint arXiv (cs.CR).
+
+---
+
+## 10. Prochaines étapes
+
+- [ ] Borne inconditionnelle sur `r_x` (plafonnement absolu `r_cap`)
+- [ ] Réduire les faux positifs en compromission partielle
+- [ ] Sensibilité à `θ_ρ` et `λ_τ`
+- [ ] Validation sur un lignage réel (Apache Atlas, OpenLineage)
+- [ ] Rédaction de la section *Related Work*
+- [ ] Preprint arXiv, puis démarchage de co-auteur

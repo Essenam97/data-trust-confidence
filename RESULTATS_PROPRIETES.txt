@@ -1,60 +1,55 @@
-========================================================================
-PROPOSITION 1 — Non-suffisance de l'ascendance
-========================================================================
+==========================================================================
+ADVERSE 1 — Compromission PARTIELLE
+==========================================================================
 
-  Une donnée sans preuve propre reste bornée par
-      P_x ≤ (r_x + a_x·W) / (r_x + W)
+Évalué sur 20 graphes (seeds 100-119), disjoints des seeds 0-7
+ayant servi à calibrer le plafond de masse propagée.
 
-  confiance du parent          : 0.976
-  preuves locales de la donnée : 0
-  masses (r, s)                : (0.0223, 0.0000)
-  taux de base a_x             : 0.15
+Seules 40 % des données issues de la source sont réellement touchées.
+Le lignage ne suffit plus : des voisines immédiates partagent la même
+ascendance sans être affectées. Cas défavorable à toute propagation.
 
-  P mesuré                     : 0.1594
-  borne analytique             : 0.1594
-  pire cas (|ΔP|=1, un saut)   : 0.2609
+modèle                AUC   faux pos.
+-------------------------------------
+static              0.779        0.0%
+discounting         0.779        0.0%
+eigentrust          0.779      100.0%
+dtc                 0.783      100.0%
 
-  OK : la borne est respectée.
+==========================================================================
+ADVERSE 3 — DIFFAMATION
+==========================================================================
 
-  Seuil τ=0.5 franchi seulement si r_x ≥ 1.40
-  (r_x observé = 0.0223, soit 63× moins)
+Un adversaire contrôle UNE source dont dérivent 30 données légitimes,
+bien attestées, qu'il ne contrôle pas. Il alterne dégradations et
+rétablissements pour accumuler de la défiance en aval.
 
-========================================================================
-PROPOSITION 2 — Terminaison sur graphe cyclique
-========================================================================
+ impulsions   static  discount    eigen  dtc accum.  dtc stand.
+---------------------------------------------------------------
+          1       0%        0%       0%          0%          0%
+          2       0%        0%       0%          0%          0%
+          4       0%        0%       0%          0%          0%
+          8       0%        0%       0%        100%          0%
+         16       0%        0%       0%        100%          0%
 
-  Graphes entièrement cycliques (cycle hamiltonien + arêtes aléatoires)
+Le mode 'standing' referme la vulnérabilité sans renoncer à
+l'amplification qui donne au DTC son pouvoir de détection.
 
-      n   arêtes      durée   propagations  prof. max
-  ---------------------------------------------------
-      5        7     0.15 ms             14          4
-     20       35     0.36 ms             50          4
-     60      110     0.10 ms            115          4
-    200      380     1.30 ms            443          4
-    500      899     0.91 ms            946          4
+==========================================================================
+ADVERSE 2 — Compromission révélée TARDIVEMENT
+==========================================================================
 
-  OK : terminaison, profondeur ≤ δ_max = 4.
+Teste λ = 0 sur `origin_compromise` : la défiance doit-elle survivre
+à un long délai ? Sinon, attendre suffirait à blanchir la donnée.
 
-========================================================================
-PROPOSITION 3 — Découplage détection / injection
-========================================================================
+     délai    P source    P enfant
+----------------------------------
+        60       0.280       0.296
+       200       0.245       0.254
+      1000       0.180       0.236
+      5000       0.121       0.236
+     50000       0.120       0.236
 
-  γ⁻ ne doit avoir AUCUN effet sur la confiance d'une donnée fabriquée.
-
-      γ⁻ ×    P fabriquée    uplift
-  ---------------------------------
-         1         0.1594    0.0094
-         4         0.1594    0.0094
-        16         0.1594    0.0094
-        64         0.1594    0.0094
-       256         0.1594    0.0094
-
-  OK : variation observée = 0.00e+00
-  γ⁻ multiplié par 256 : aucun effet mesurable sur l'injection.
-
-========================================================================
-BILAN — 3/3 propositions vérifiées empiriquement
-========================================================================
-
-Rappel : ces vérifications ne remplacent pas les démonstrations
-de PROPRIETES.md, elles les corroborent sur des instances concrètes.
+La défiance ne s'érode pas avec le délai : λ = 0 fait son office.
+À comparer avec les preuves POSITIVES anciennes, qui elles décroissent —
+d'où une source d'autant plus dégradée que la révélation est tardive.
